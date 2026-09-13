@@ -57,3 +57,5 @@ node_modules/
 *.pyc
 .venv/
 venv/
+# Local scratch (not committed)
+Temp/
