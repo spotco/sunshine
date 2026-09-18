@@ -3,6 +3,7 @@
 Date: 2026-09-18
 Status: Implemented on feature branch; Windows RelWithDebInfo verify pending on host
 Branch: `feature/stream-diagnostics-recovery`
+PR: https://github.com/spotco/sunshine/pull/1
 Base: `v2026.906.222525-spotcobuild`
 Scope: multi-day; milestone order below
 
@@ -271,7 +272,7 @@ bundle.
       spotcoasus2025 or equivalent); at minimum ensure the tree compiles on
       the agent’s available platform and Windows-specific files are
       syntax-checked.
-- [ ] Open a PR into `v2026.906.222525-spotcobuild` (or merge-ready branch
+- [x] Open a PR into `v2026.906.222525-spotcobuild` (or merge-ready branch
       per repo norms) describing how to validate with a real stream and how
       to read the new failure narrative.
 
