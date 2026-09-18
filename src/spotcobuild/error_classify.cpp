@@ -162,14 +162,8 @@ std::optional<std::int64_t> query_device_removed_reason(void *d3d_or_dxgi_device
   if (!d3d_or_dxgi_device) {
     return std::nullopt;
   }
+  // GetDeviceRemovedReason is on ID3D11Device (not IDXGIDevice).
   auto *unk = static_cast<IUnknown *>(d3d_or_dxgi_device);
-  IDXGIDevice *dxgi = nullptr;
-  if (SUCCEEDED(unk->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void **>(&dxgi))) && dxgi) {
-    const HRESULT reason = dxgi->GetDeviceRemovedReason();
-    dxgi->Release();
-    return static_cast<std::int64_t>(static_cast<std::uint32_t>(reason));
-  }
-  // ID3D11Device also exposes GetDeviceRemovedReason
   ID3D11Device *d3d = nullptr;
   if (SUCCEEDED(unk->QueryInterface(__uuidof(ID3D11Device), reinterpret_cast<void **>(&d3d))) && d3d) {
     const HRESULT reason = d3d->GetDeviceRemovedReason();
