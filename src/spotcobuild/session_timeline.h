@@ -20,6 +20,14 @@
 
 namespace spotcobuild {
 
+// Retention / rotation knobs (constants; config wiring optional later).
+inline constexpr std::uintmax_t k_diag_jsonl_max_bytes = 8ull * 1024 * 1024;  // 8 MiB
+inline constexpr std::size_t k_diag_retain_sessions = 24;
+inline constexpr std::size_t k_diag_retain_ring_dumps = 24;
+inline constexpr std::size_t k_diag_retain_bundles = 12;
+inline constexpr std::uintmax_t k_diag_dir_max_bytes = 256ull * 1024 * 1024;  // 256 MiB
+inline constexpr std::chrono::seconds k_diag_jsonl_coalesce_interval {5};
+
 struct timeline_event_t {
   std::chrono::system_clock::time_point wall_time;
   std::chrono::steady_clock::time_point mono_time;
@@ -42,6 +50,9 @@ public:
 
   void dump_ring_on_failure(const std::string &session_id, failure_category category = failure_category::unknown);
 
+  /** Delete old session JSONL / ring dumps / bundles per retention policy. */
+  void prune_diagnostics_dir();
+
   std::filesystem::path diagnostics_dir() const;
   std::filesystem::path jsonl_path(const std::string &session_id) const;
   std::filesystem::path ring_dump_path(const std::string &session_id) const;
@@ -58,7 +69,9 @@ private:
 
   void ensure_dir_unlocked();
   void append_jsonl_unlocked(const std::string &session_id, const timeline_event_t &ev);
+  void write_jsonl_line_unlocked(const std::string &session_id, const timeline_event_t &ev);
   void prune_ring_unlocked(const std::string &session_id, std::chrono::steady_clock::time_point now);
+  void prune_diagnostics_dir_unlocked();
 
   mutable std::mutex mutex_;
   bool enabled_ = true;
@@ -66,6 +79,8 @@ private:
   std::string active_session_id_;
   std::unordered_map<std::string, std::vector<timeline_event_t>> rings_;
   std::unordered_map<std::string, failure_category> last_category_;
+  // session_id -> event type -> last JSONL write mono time (rate-limited coalesced types).
+  std::unordered_map<std::string, std::unordered_map<std::string, std::chrono::steady_clock::time_point>> last_jsonl_coalesce_;
   std::filesystem::path diag_dir_;
 };
 

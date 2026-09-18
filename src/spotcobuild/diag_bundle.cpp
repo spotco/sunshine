@@ -134,6 +134,8 @@ bundle_result_t export_diagnostic_bundle(std::optional<std::filesystem::path> ou
   result.ok = true;
   result.path = zip_path;
   BOOST_LOG(info) << "spotcobuild diagnostic bundle written: " << zip_path.string();
+  // Cap bundle pile-up: prune after successful write.
+  session_timeline_t::instance().prune_diagnostics_dir();
   return result;
 }
 

@@ -10,13 +10,33 @@
 #include "src/utility.h"
 #include "src/uuid.h"
 
+#include <algorithm>
 #include <fstream>
+#include <vector>
 
 namespace spotcobuild {
 namespace {
 
-bool is_coalesced_ring_type(std::string_view type) {
-  return type == "control_ping_received";
+bool is_ring_coalesced_type(std::string_view type) {
+  return type == "control_ping_received" ||
+         type == "dxgi_error" ||
+         type == "nvenc_error" ||
+         type == "nvenc_probe_error" ||
+         type == "network_error" ||
+         type == "display_change" ||
+         type == "display_mode_changed" ||
+         type == "capture_surface_recreate";
+}
+
+/** High-frequency types that may persist to JSONL, but at most ~every 5s while coalesced. */
+bool is_jsonl_rate_limited_type(std::string_view type) {
+  return type == "dxgi_error" ||
+         type == "nvenc_error" ||
+         type == "nvenc_probe_error" ||
+         type == "network_error" ||
+         type == "display_change" ||
+         type == "display_mode_changed" ||
+         type == "capture_surface_recreate";
 }
 
 std::string iso8601(std::chrono::system_clock::time_point tp) {
@@ -34,6 +54,16 @@ std::string iso8601(std::chrono::system_clock::time_point tp) {
     tm.tm_hour, tm.tm_min, tm.tm_sec,
     static_cast<long long>(ms.count()));
   return buf;
+}
+
+struct diag_file_t {
+  std::filesystem::path path;
+  std::filesystem::file_time_type mtime {};
+  std::uintmax_t size = 0;
+};
+
+bool mtime_newer(const diag_file_t &a, const diag_file_t &b) {
+  return a.mtime > b.mtime;
 }
 
 }  // namespace
@@ -82,6 +112,146 @@ std::filesystem::path session_timeline_t::ring_dump_path(const std::string &sess
   return diagnostics_dir() / (session_id + ".ring.jsonl");
 }
 
+void session_timeline_t::prune_diagnostics_dir() {
+  std::lock_guard lg(mutex_);
+  if (!enabled_) {
+    return;
+  }
+  prune_diagnostics_dir_unlocked();
+}
+
+void session_timeline_t::prune_diagnostics_dir_unlocked() {
+  ensure_dir_unlocked();
+  std::error_code ec;
+
+  std::vector<diag_file_t> jsonl_sessions;
+  std::vector<diag_file_t> rings;
+  std::vector<diag_file_t> bundles;
+  std::vector<std::filesystem::path> rotated_ones;
+
+  for (const auto &entry : std::filesystem::directory_iterator(diag_dir_, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!entry.is_regular_file(ec) || ec) {
+      continue;
+    }
+    const auto name = entry.path().filename().string();
+    const auto mtime = entry.last_write_time(ec);
+    if (ec) {
+      continue;
+    }
+    const auto size = entry.file_size(ec);
+    if (ec) {
+      continue;
+    }
+
+    if (name.starts_with("sunshine-diag-") && name.ends_with(".zip")) {
+      bundles.push_back({entry.path(), mtime, size});
+    }
+    else if (name.ends_with(".ring.jsonl")) {
+      rings.push_back({entry.path(), mtime, size});
+    }
+    else if (name.ends_with(".jsonl.1")) {
+      rotated_ones.push_back(entry.path());
+    }
+    else if (name.ends_with(".jsonl")) {
+      jsonl_sessions.push_back({entry.path(), mtime, size});
+    }
+  }
+
+  std::sort(jsonl_sessions.begin(), jsonl_sessions.end(), mtime_newer);
+  std::sort(rings.begin(), rings.end(), mtime_newer);
+  std::sort(bundles.begin(), bundles.end(), mtime_newer);
+
+  auto remove_file = [&](const std::filesystem::path &p) {
+    std::error_code rec;
+    std::filesystem::remove(p, rec);
+  };
+
+  // Keep newest N session JSONL files; delete extras and their .1 rotations together.
+  for (std::size_t i = k_diag_retain_sessions; i < jsonl_sessions.size(); ++i) {
+    remove_file(jsonl_sessions[i].path);
+    remove_file(std::filesystem::path(jsonl_sessions[i].path.string() + ".1"));
+  }
+  if (jsonl_sessions.size() > k_diag_retain_sessions) {
+    jsonl_sessions.resize(k_diag_retain_sessions);
+  }
+
+  for (std::size_t i = k_diag_retain_ring_dumps; i < rings.size(); ++i) {
+    remove_file(rings[i].path);
+  }
+  if (rings.size() > k_diag_retain_ring_dumps) {
+    rings.resize(k_diag_retain_ring_dumps);
+  }
+
+  for (std::size_t i = k_diag_retain_bundles; i < bundles.size(); ++i) {
+    remove_file(bundles[i].path);
+  }
+  if (bundles.size() > k_diag_retain_bundles) {
+    bundles.resize(k_diag_retain_bundles);
+  }
+
+  // Drop orphaned .jsonl.1 whose base session file is gone.
+  for (const auto &p1 : rotated_ones) {
+    const auto s = p1.string();
+    if (!s.ends_with(".jsonl.1")) {
+      continue;
+    }
+    const auto base = std::filesystem::path(s.substr(0, s.size() - 2));  // strip trailing ".1"
+    if (!std::filesystem::exists(base, ec)) {
+      remove_file(p1);
+    }
+  }
+
+  auto matching_total_bytes = [&]() -> std::uintmax_t {
+    std::uintmax_t total = 0;
+    auto add_if_exists = [&](const std::filesystem::path &p) {
+      std::error_code fec;
+      if (std::filesystem::exists(p, fec) && !fec) {
+        const auto sz = std::filesystem::file_size(p, fec);
+        if (!fec) {
+          total += sz;
+        }
+      }
+    };
+    for (const auto &f : jsonl_sessions) {
+      add_if_exists(f.path);
+      add_if_exists(std::filesystem::path(f.path.string() + ".1"));
+    }
+    for (const auto &f : rings) {
+      add_if_exists(f.path);
+    }
+    for (const auto &f : bundles) {
+      add_if_exists(f.path);
+    }
+    return total;
+  };
+
+  // Soft size cap: delete oldest bundles first, then oldest jsonl/ring.
+  while (matching_total_bytes() > k_diag_dir_max_bytes) {
+    if (!bundles.empty()) {
+      remove_file(bundles.back().path);
+      bundles.pop_back();
+      continue;
+    }
+    if (jsonl_sessions.empty() && rings.empty()) {
+      break;
+    }
+    const bool drop_jsonl = rings.empty() ||
+      (!jsonl_sessions.empty() && jsonl_sessions.back().mtime <= rings.back().mtime);
+    if (drop_jsonl) {
+      remove_file(jsonl_sessions.back().path);
+      remove_file(std::filesystem::path(jsonl_sessions.back().path.string() + ".1"));
+      jsonl_sessions.pop_back();
+    }
+    else {
+      remove_file(rings.back().path);
+      rings.pop_back();
+    }
+  }
+}
+
 std::string session_timeline_t::begin_session() {
   auto id = uuid_util::uuid_t::generate().string();
   std::lock_guard lg(mutex_);
@@ -90,6 +260,7 @@ std::string session_timeline_t::begin_session() {
     return id;
   }
   ensure_dir_unlocked();
+  prune_diagnostics_dir_unlocked();
   active_session_id_ = id;
   rings_[id] = {};
   last_category_[id] = failure_category::none;
@@ -116,6 +287,10 @@ void session_timeline_t::end_session(const std::string &session_id, std::string_
   if (active_session_id_ == session_id) {
     active_session_id_.clear();
   }
+  // Keep disk files for the retention window; free per-session memory.
+  rings_.erase(session_id);
+  last_category_.erase(session_id);
+  last_jsonl_coalesce_.erase(session_id);
 }
 
 void session_timeline_t::set_active(const std::string &session_id) {
@@ -139,8 +314,7 @@ void session_timeline_t::prune_ring_unlocked(const std::string &session_id, std:
   }
 }
 
-void session_timeline_t::append_jsonl_unlocked(const std::string &session_id, const timeline_event_t &ev) {
-  ensure_dir_unlocked();
+void session_timeline_t::write_jsonl_line_unlocked(const std::string &session_id, const timeline_event_t &ev) {
   const auto path = diag_dir_ / (session_id + ".jsonl");
   std::ofstream out(path, std::ios::app | std::ios::binary);
   if (!out) {
@@ -160,6 +334,33 @@ void session_timeline_t::append_jsonl_unlocked(const std::string &session_id, co
   out << line.dump() << '\n';
 }
 
+void session_timeline_t::append_jsonl_unlocked(const std::string &session_id, const timeline_event_t &ev) {
+  ensure_dir_unlocked();
+  const auto path = diag_dir_ / (session_id + ".jsonl");
+
+  std::error_code ec;
+  if (std::filesystem::exists(path, ec) && !ec) {
+    const auto sz = std::filesystem::file_size(path, ec);
+    if (!ec && sz >= k_diag_jsonl_max_bytes) {
+      const auto rotated = diag_dir_ / (session_id + ".jsonl.1");
+      std::filesystem::remove(rotated, ec);
+      std::filesystem::rename(path, rotated, ec);
+      timeline_event_t marker {
+        std::chrono::system_clock::now(),
+        std::chrono::steady_clock::now(),
+        "jsonl_rotated",
+        nlohmann::json {
+          {"previous_bytes", sz},
+          {"max_bytes", k_diag_jsonl_max_bytes},
+        },
+      };
+      write_jsonl_line_unlocked(session_id, marker);
+    }
+  }
+
+  write_jsonl_line_unlocked(session_id, ev);
+}
+
 void session_timeline_t::emit(const std::string &session_id, std::string_view type, nlohmann::json fields, bool persist) {
   if (session_id.empty()) {
     return;
@@ -171,23 +372,47 @@ void session_timeline_t::emit(const std::string &session_id, std::string_view ty
   const auto now_wall = std::chrono::system_clock::now();
   const auto now_mono = std::chrono::steady_clock::now();
   auto &ring = rings_[session_id];
+  const bool ring_coalesce = is_ring_coalesced_type(type);
+  const bool jsonl_rate_limit = is_jsonl_rate_limited_type(type);
 
-  if (is_coalesced_ring_type(type) && !ring.empty() && ring.back().type == type) {
+  if (ring_coalesce && !ring.empty() && ring.back().type == type) {
     // Update in place: one live coalesced entry for this high-frequency type.
     ring.back().wall_time = now_wall;
     ring.back().mono_time = now_mono;
     if (!ring.back().fields.is_object()) {
       ring.back().fields = nlohmann::json::object();
     }
+    // Merge latest fields (keep count separately).
+    if (fields.is_object()) {
+      for (auto it = fields.begin(); it != fields.end(); ++it) {
+        if (it.key() == "count") {
+          continue;
+        }
+        ring.back().fields[it.key()] = it.value();
+      }
+    }
     const auto prev = ring.back().fields.value("count", 1);
     ring.back().fields["count"] = prev + 1;
-    // Never JSONL-append coalesced updates (caller may also pass persist=false).
+
+    // Rate-limited JSONL: at most every k_diag_jsonl_coalesce_interval while streak continues.
+    // control_ping stays ring-only (persist=false from caller; not in jsonl_rate_limit set).
+    if (persist && jsonl_rate_limit) {
+      auto &last_map = last_jsonl_coalesce_[session_id];
+      auto lit = last_map.find(std::string(type));
+      const bool due = (lit == last_map.end()) ||
+        ((now_mono - lit->second) >= k_diag_jsonl_coalesce_interval);
+      if (due) {
+        append_jsonl_unlocked(session_id, ring.back());
+        last_map[std::string(type)] = now_mono;
+      }
+    }
+
     prune_ring_unlocked(session_id, now_mono);
     return;
   }
 
   timeline_event_t ev {now_wall, now_mono, std::string(type), std::move(fields)};
-  if (is_coalesced_ring_type(type)) {
+  if (ring_coalesce) {
     if (!ev.fields.is_object()) {
       ev.fields = nlohmann::json::object();
     }
@@ -197,6 +422,9 @@ void session_timeline_t::emit(const std::string &session_id, std::string_view ty
   }
   if (persist) {
     append_jsonl_unlocked(session_id, ev);
+    if (jsonl_rate_limit) {
+      last_jsonl_coalesce_[session_id][std::string(type)] = now_mono;
+    }
   }
   ring.push_back(std::move(ev));
   prune_ring_unlocked(session_id, now_mono);
@@ -248,6 +476,7 @@ void session_timeline_t::dump_ring_on_failure(const std::string &session_id, fai
   }
   BOOST_LOG(warning) << "spotcobuild dumped failure ring for session " << session_id
                      << " category=" << category_name(category) << " path=" << path.string();
+  prune_diagnostics_dir_unlocked();
 }
 
 std::vector<timeline_event_t> session_timeline_t::ring_snapshot(const std::string &session_id) const {
@@ -266,6 +495,9 @@ nlohmann::json session_timeline_t::health_snapshot() const {
   j["active_session_id"] = active_session_id_;
   j["ring_window_ms"] = ring_window_.count();
   j["diagnostics_dir"] = (diag_dir_.empty() ? (platf::appdata() / "diagnostics") : diag_dir_).string();
+  j["jsonl_max_bytes"] = k_diag_jsonl_max_bytes;
+  j["diag_retain_sessions"] = k_diag_retain_sessions;
+  j["diag_dir_max_bytes"] = k_diag_dir_max_bytes;
   if (!active_session_id_.empty()) {
     auto cat_it = last_category_.find(active_session_id_);
     if (cat_it != last_category_.end()) {
