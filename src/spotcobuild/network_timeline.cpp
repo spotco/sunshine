@@ -17,7 +17,9 @@ void track_network_event(std::string_view type, std::string_view channel, std::i
   if (error_code != 0) {
     fields["error_code"] = error_code;
   }
-  session_timeline_t::instance().emit_active(type, fields);
+  // High-frequency control pings: ring-only (coalesced), never JSONL spam.
+  const bool persist = (type != "control_ping_received");
+  session_timeline_t::instance().emit_active(type, fields, persist);
   if (error_code != 0 && (type == "packet_send_fail" || type == "udp_bind_fail" || type == "network_timeout")) {
     classify_network_failure(type, error_code);
   }

@@ -15,6 +15,10 @@
 namespace spotcobuild {
 namespace {
 
+bool is_coalesced_ring_type(std::string_view type) {
+  return type == "control_ping_received";
+}
+
 std::string iso8601(std::chrono::system_clock::time_point tp) {
   const auto tt = std::chrono::system_clock::to_time_t(tp);
   const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()) % 1000;
@@ -156,7 +160,7 @@ void session_timeline_t::append_jsonl_unlocked(const std::string &session_id, co
   out << line.dump() << '\n';
 }
 
-void session_timeline_t::emit(const std::string &session_id, std::string_view type, nlohmann::json fields) {
+void session_timeline_t::emit(const std::string &session_id, std::string_view type, nlohmann::json fields, bool persist) {
   if (session_id.empty()) {
     return;
   }
@@ -166,19 +170,45 @@ void session_timeline_t::emit(const std::string &session_id, std::string_view ty
   }
   const auto now_wall = std::chrono::system_clock::now();
   const auto now_mono = std::chrono::steady_clock::now();
+  auto &ring = rings_[session_id];
+
+  if (is_coalesced_ring_type(type) && !ring.empty() && ring.back().type == type) {
+    // Update in place: one live coalesced entry for this high-frequency type.
+    ring.back().wall_time = now_wall;
+    ring.back().mono_time = now_mono;
+    if (!ring.back().fields.is_object()) {
+      ring.back().fields = nlohmann::json::object();
+    }
+    const auto prev = ring.back().fields.value("count", 1);
+    ring.back().fields["count"] = prev + 1;
+    // Never JSONL-append coalesced updates (caller may also pass persist=false).
+    prune_ring_unlocked(session_id, now_mono);
+    return;
+  }
+
   timeline_event_t ev {now_wall, now_mono, std::string(type), std::move(fields)};
-  append_jsonl_unlocked(session_id, ev);
-  rings_[session_id].push_back(ev);
+  if (is_coalesced_ring_type(type)) {
+    if (!ev.fields.is_object()) {
+      ev.fields = nlohmann::json::object();
+    }
+    if (!ev.fields.contains("count")) {
+      ev.fields["count"] = 1;
+    }
+  }
+  if (persist) {
+    append_jsonl_unlocked(session_id, ev);
+  }
+  ring.push_back(std::move(ev));
   prune_ring_unlocked(session_id, now_mono);
 }
 
-void session_timeline_t::emit_active(std::string_view type, nlohmann::json fields) {
+void session_timeline_t::emit_active(std::string_view type, nlohmann::json fields, bool persist) {
   std::string id;
   {
     std::lock_guard lg(mutex_);
     id = active_session_id_;
   }
-  emit(id, type, std::move(fields));
+  emit(id, type, std::move(fields), persist);
 }
 
 void session_timeline_t::dump_ring_on_failure(const std::string &session_id, failure_category category) {
@@ -243,6 +273,16 @@ nlohmann::json session_timeline_t::health_snapshot() const {
     }
     auto ring_it = rings_.find(active_session_id_);
     j["ring_event_count"] = ring_it == rings_.end() ? 0 : ring_it->second.size();
+    if (ring_it != rings_.end()) {
+      const auto now = std::chrono::steady_clock::now();
+      for (auto rit = ring_it->second.rbegin(); rit != ring_it->second.rend(); ++rit) {
+        if (rit->type == "control_ping_received") {
+          j["control_ping_age_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(now - rit->mono_time).count();
+          j["control_ping_count"] = rit->fields.value("count", 1);
+          break;
+        }
+      }
+    }
   }
   return j;
 }

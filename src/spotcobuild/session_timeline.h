@@ -37,8 +37,8 @@ public:
   void set_active(const std::string &session_id);
   std::string active_session_id() const;
 
-  void emit(const std::string &session_id, std::string_view type, nlohmann::json fields = {});
-  void emit_active(std::string_view type, nlohmann::json fields = {});
+  void emit(const std::string &session_id, std::string_view type, nlohmann::json fields = {}, bool persist = true);
+  void emit_active(std::string_view type, nlohmann::json fields = {}, bool persist = true);
 
   void dump_ring_on_failure(const std::string &session_id, failure_category category = failure_category::unknown);
 
