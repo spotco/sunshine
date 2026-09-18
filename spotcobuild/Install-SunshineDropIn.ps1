@@ -6,8 +6,9 @@
   Copies sunshine.exe and tools\*.exe used at runtime, plus matching .pdb files
   when present, from a Sunshine build directory into an existing install.
 
-  Does NOT copy assets\, and does NOT touch config\, scripts\, Uninstall.exe,
-  or credentials. Stop the Sunshine service / exit the tray app before running.
+  By default does NOT copy assets\. Pass -IncludeAssets to mirror build\assets
+  into the install (needed when Web UI hashed bundles change). Still does NOT touch
+  config\, scripts\, Uninstall.exe, or credentials. Stop the Sunshine service / exit the tray app before running.
 
   Note: MSYS2/MinGW RelWithDebInfo builds usually embed DWARF debug info inside
   the .exe (no separate .pdb). PDB copy is for MSVC/clang-cl builds that emit them.
@@ -35,7 +36,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string] $InstallDir = 'C:\Program Files\Sunshine'
+    [string] $InstallDir = 'C:\Program Files\Sunshine',
+
+    [Parameter(Mandatory = $false)]
+    [switch] $IncludeAssets
 )
 
 Set-StrictMode -Version Latest
@@ -120,5 +124,23 @@ if ($optionalSkipped.Count -gt 0) {
     Write-Host ("No PDB beside build exes (skipped): {0}" -f ($optionalSkipped -join ', '))
     Write-Host "MinGW RelWithDebInfo usually embeds DWARF in the .exe itself; WinDbg wants PDB."
 }
-Write-Host "Done. Copied exes only (no assets). Left untouched: assets\, config\, scripts\, Uninstall.exe."
+
+if ($IncludeAssets) {
+    $assetsSrc = Join-Path $BuildDir 'assets'
+    $assetsDst = Join-Path $InstallDir 'assets'
+    if (-not (Test-Path -LiteralPath $assetsSrc -PathType Container)) {
+        throw "IncludeAssets requested but build assets missing: $assetsSrc"
+    }
+    if ($PSCmdlet.ShouldProcess($assetsDst, "Mirror assets from $assetsSrc")) {
+        if (Test-Path -LiteralPath $assetsDst -PathType Container) {
+            Remove-Item -LiteralPath $assetsDst -Recurse -Force
+        }
+        Copy-Item -LiteralPath $assetsSrc -Destination $assetsDst -Recurse -Force
+        Write-Host "Mirrored assets  $assetsDst"
+    }
+    Write-Host "Done. Copied exes + assets. Left untouched: config\, scripts\, Uninstall.exe."
+}
+else {
+    Write-Host "Done. Copied exes only (no assets). Left untouched: assets\, config\, scripts\, Uninstall.exe."
+}
 Write-Host "Restart the Sunshine service / tray app when you are ready."
