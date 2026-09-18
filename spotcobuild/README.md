@@ -9,20 +9,50 @@ Helpers for Windows spotcobuild Sunshine forks.
 | `v2025.924.154138-spotcobuild` | `v2025.924.154138` | Needs MinGW synthetic-pointer guard in `input.cpp` |
 | `v2026.906.222525-spotcobuild` | `v2026.906.222525` | No Sunshine source patches; needs .NET SDK for WiX configure |
 
+## Update-SunshineFromBuild.ps1 (recommended)
+
+One-shot **stop → drop-in → restart** for a local RelWithDebInfo build.
+
+- Self-elevates with UAC if needed
+- Stops `SunshineService` (and stray `sunshine` / `sunshinesvc` processes)
+- Copies exes **and** `assets\` by default (pass `-SkipAssets` for exe-only)
+- Leaves `config\`, credentials, and `scripts\` alone
+- Starts `SunshineService` and prints product version before/after
+
+```powershell
+# From the repo root (UAC prompt if not already elevated):
+.\spotcobuild\Update-SunshineFromBuild.ps1
+
+# Explicit build dir:
+.\spotcobuild\Update-SunshineFromBuild.ps1 -BuildDir F:\dev\sunshine\build
+
+# Preview only:
+.\spotcobuild\Update-SunshineFromBuild.ps1 -WhatIf
+```
+
+After a successful run, confirm with:
+
+```powershell
+[Diagnostics.FileVersionInfo]::GetVersionInfo('C:\Program Files\Sunshine\sunshine.exe').ProductVersion
+Get-Service SunshineService
+```
+
 ## Install-SunshineDropIn.ps1
 
-Copies **exes only** into an existing install (default `C:\Program Files\Sunshine`):
+Lower-level copy helper used by `Update-SunshineFromBuild.ps1`. Copies into an
+existing install (default `C:\Program Files\Sunshine`):
 
 - `sunshine.exe`
 - `tools\sunshinesvc.exe`, `tools\audio-info.exe`, `tools\dxgi-info.exe`
 - sibling `.pdb` files when present (optional)
+- with `-IncludeAssets`: mirrors `build\assets` (needed when Web UI hashes change)
 
-Does **not** copy `assets\`. Leaves `config\`, `scripts\`, `Uninstall.exe` alone.
+Leaves `config\`, `scripts\`, `Uninstall.exe`, credentials alone.
 
-**Stop Sunshine first.** Use an elevated PowerShell for Program Files.
+**Stop Sunshine first** (or use `Update-SunshineFromBuild.ps1`). Elevated PowerShell for Program Files.
 
 ```powershell
-.\spotcobuild\Install-SunshineDropIn.ps1 -BuildDir F:\dev\sunshine\build
+.\spotcobuild\Install-SunshineDropIn.ps1 -BuildDir F:\dev\sunshine\build -IncludeAssets
 .\spotcobuild\Install-SunshineDropIn.ps1 -BuildDir F:\dev\sunshine\build -WhatIf
 ```
 
