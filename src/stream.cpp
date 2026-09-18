@@ -1812,7 +1812,9 @@ namespace stream {
                     session->localAddress,
                   };
 
-                  platf::send(send_info);
+                  if (!platf::send(send_info)) {
+                    spotcobuild::track_network_event("packet_send_fail", "video", 0, "unbatched_send");
+                  }
                 }
               }
               frame_send_batch_latency_logger.second_point_now_and_log();
@@ -1920,7 +1922,9 @@ namespace stream {
           session->audio.peer.port(),
           session->localAddress,
         };
-        platf::send(send_info);
+        if (!platf::send(send_info)) {
+          spotcobuild::track_network_event("packet_send_fail", "audio", 0, "audio_send");
+        }
 
         auto &fec_packet = session->audio.fec_packet;
         // initialize the FEC header at the beginning of the FEC block
@@ -1972,7 +1976,7 @@ namespace stream {
 
     if (ctx.control_server.bind(address_family, control_port)) {
       BOOST_LOG(error) << "Couldn't bind Control server to port ["sv << control_port << "], likely another process already bound to the port"sv;
-
+      spotcobuild::track_network_event("udp_bind_fail", "control", control_port, "control_bind");
       return -1;
     }
 
@@ -2001,7 +2005,7 @@ namespace stream {
     ctx.video_sock.bind(udp::endpoint(bind_addr, video_port), ec);
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Video server to port ["sv << video_port << "]: "sv << ec.message();
-
+      spotcobuild::track_network_event("udp_bind_fail", "video", ec.value(), ec.message());
       return -1;
     }
 
@@ -2015,7 +2019,7 @@ namespace stream {
     ctx.audio_sock.bind(udp::endpoint(bind_addr, audio_port), ec);
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Audio server to port ["sv << audio_port << "]: "sv << ec.message();
-
+      spotcobuild::track_network_event("udp_bind_fail", "audio", ec.value(), ec.message());
       return -1;
     }
 
@@ -2124,6 +2128,9 @@ namespace stream {
 
       // Update connection details.
       peer = recv_peer;
+      const char *channel = (type == socket_e::video) ? "video" : "audio";
+      const char *ev = (type == socket_e::video) ? "video_ping_received" : "audio_ping_received";
+      spotcobuild::track_network_event(ev, channel);
       return 0;
     }
 
@@ -2340,8 +2347,17 @@ namespace stream {
           {"fps", config.monitor.framerate},
           {"dynamicRange", config.monitor.dynamicRange},
           {"client_name", launch_session.unique_id},
+          {"capture", config::video.capture},
+          {"output_name", config::video.output_name},
+          {"adapter_name", config::video.adapter_name},
         };
         spotcobuild::session_timeline_t::instance().emit(session->diag_session_id, "session_alloc", std::move(fields));
+        if (launch_session.diag_rtsp_first_seen) {
+          spotcobuild::session_timeline_t::instance().emit(session->diag_session_id, "rtsp_first_message", nlohmann::json {
+            {"command", launch_session.diag_rtsp_first_command},
+            {"channel", "rtsp"},
+          });
+        }
       }
 
       session->launch_session_id = launch_session.id;

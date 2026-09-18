@@ -61,6 +61,7 @@
 #include "src/config.h"
 #include "src/entry_handler.h"
 #include "src/logging.h"
+#include "src/spotcobuild/network_timeline.h"
 #include "src/platform/common.h"
 #include "vaapi.h"
 
@@ -853,6 +854,7 @@ namespace platf {
           }
 
           BOOST_LOG(warning) << "sendmmsg() failed: "sv << errno;
+          spotcobuild::track_network_event("packet_send_fail", "udp", static_cast<std::int64_t>(errno), "sendmmsg");
           return false;
         }
 
@@ -978,6 +980,7 @@ namespace platf {
 
     if (bytes_sent < 0) {
       BOOST_LOG(warning) << "sendmsg() failed: "sv << errno;
+      spotcobuild::track_network_event("packet_send_fail", "udp", static_cast<std::int64_t>(errno), "sendmsg");
       return false;
     }
 

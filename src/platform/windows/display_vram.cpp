@@ -27,6 +27,7 @@ extern "C" {
 #include "src/nvenc/nvenc_dynamic_factory.h"
 #include "src/video.h"
 #include "utf_utils.h"
+#include "src/spotcobuild/spotcobuild.h"
 
 #if !defined(SUNSHINE_SHADERS_DIR)  // for testing this needs to be defined in cmake as we don't do an install
   /**
@@ -1420,6 +1421,14 @@ namespace platf::dxgi {
       // mismatched image pool and desktop texture sizes. If this happens, just reinit again.
       if (desc.Width != width_before_rotation || desc.Height != height_before_rotation) {
         BOOST_LOG(info) << "Capture size changed ["sv << width << 'x' << height << " -> "sv << desc.Width << 'x' << desc.Height << ']';
+        spotcobuild::track_display_change(
+          "mode_change",
+          config::video.output_name,
+          static_cast<int>(desc.Width),
+          static_cast<int>(desc.Height),
+          0.0,
+          false
+        );
         return capture_e::reinit;
       }
 

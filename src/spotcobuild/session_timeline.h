@@ -48,6 +48,15 @@ public:
   void emit(const std::string &session_id, std::string_view type, nlohmann::json fields = {}, bool persist = true);
   void emit_active(std::string_view type, nlohmann::json fields = {}, bool persist = true);
 
+  /** Record capture/encode metadata for later first_frame fields (cheap; call from capture_start). */
+  void set_capture_meta(int video_format);
+
+  /**
+   * Record a successfully encoded/sent frame.
+   * Emits first_frame once; updates last_frame_number for session_end / ring dump.
+   */
+  void note_successful_frame(std::uint64_t frame_number);
+
   void dump_ring_on_failure(const std::string &session_id, failure_category category = failure_category::unknown);
 
   /** Delete old session JSONL / ring dumps / bundles per retention policy. */
@@ -81,6 +90,10 @@ private:
   std::unordered_map<std::string, failure_category> last_category_;
   // session_id -> event type -> last JSONL write mono time (rate-limited coalesced types).
   std::unordered_map<std::string, std::unordered_map<std::string, std::chrono::steady_clock::time_point>> last_jsonl_coalesce_;
+  std::unordered_map<std::string, bool> first_frame_seen_;
+  std::unordered_map<std::string, std::uint64_t> last_frame_number_;
+  std::unordered_map<std::string, int> video_format_;
+  std::unordered_map<std::string, bool> last_frame_emitted_;
   std::filesystem::path diag_dir_;
 };
 

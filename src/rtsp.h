@@ -44,6 +44,10 @@ namespace rtsp_stream {
     std::string rtsp_url_scheme;  ///< URL scheme selected by the RTSP SETUP flow.
     uint32_t rtsp_iv_counter;  ///< Counter value mixed into encrypted RTSP IVs.
     std::string client_cert;  ///< PEM certificate for the paired Moonlight client.
+
+    // spotcobuild: first RTSP command observed before stream session UUID exists
+    bool diag_rtsp_first_seen = false;  ///< Whether the first RTSP message was recorded.
+    std::string diag_rtsp_first_command;  ///< First RTSP method name (OPTIONS/DESCRIBE/...).
   };
 
   /**

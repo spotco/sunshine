@@ -2477,6 +2477,7 @@ namespace video {
         BOOST_LOG(error) << "Could not encode video packet"sv;
         return;
       }
+      spotcobuild::session_timeline_t::instance().note_successful_frame(static_cast<std::uint64_t>(frame_nr - 1));
 
       session->request_normal_frame();
 
@@ -2791,6 +2792,8 @@ namespace video {
             continue;
           }
 
+          spotcobuild::session_timeline_t::instance().note_successful_frame(static_cast<std::uint64_t>(ctx->frame_nr - 1));
+
           pos->session->request_normal_frame();
 
           ++pos;
@@ -2982,12 +2985,17 @@ namespace video {
           (switches.force_software_encode && *switches.force_software_encode)) {
         spotcobuild::session_timeline_t::instance().emit_active("prefer_software_encode", {});
       }
+      spotcobuild::session_timeline_t::instance().set_capture_meta(config.videoFormat);
       spotcobuild::session_timeline_t::instance().emit_active("capture_start", nlohmann::json {
         {"videoFormat", config.videoFormat},
         {"width", config.width},
         {"height", config.height},
         {"fps", config.framerate},
         {"dynamicRange", config.dynamicRange},
+        {"capture", config::video.capture},
+        {"output_name", config::video.output_name},
+        {"adapter_name", config::video.adapter_name},
+        {"encoder", chosen_encoder ? chosen_encoder->name : ""},
       });
     }
 

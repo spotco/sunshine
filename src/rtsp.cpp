@@ -525,6 +525,10 @@ namespace rtsp_stream {
      * @param req Parsed RTSP request being handled.
      */
     void handle_msg(tcp::socket &sock, launch_session_t &session, msg_t &&req) {
+      if (!session.diag_rtsp_first_seen) {
+        session.diag_rtsp_first_seen = true;
+        session.diag_rtsp_first_command = req->message.request.command ? req->message.request.command : "";
+      }
       auto func = _map_cmd_cb.find(req->message.request.command);
       if (func != std::end(_map_cmd_cb)) {
         func->second(this, sock, session, std::move(req));

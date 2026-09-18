@@ -19,6 +19,9 @@ namespace {
 
 bool is_ring_coalesced_type(std::string_view type) {
   return type == "control_ping_received" ||
+         type == "video_ping_received" ||
+         type == "audio_ping_received" ||
+         type == "packet_send_fail" ||
          type == "dxgi_error" ||
          type == "nvenc_error" ||
          type == "nvenc_probe_error" ||
@@ -30,7 +33,8 @@ bool is_ring_coalesced_type(std::string_view type) {
 
 /** High-frequency types that may persist to JSONL, but at most ~every 5s while coalesced. */
 bool is_jsonl_rate_limited_type(std::string_view type) {
-  return type == "dxgi_error" ||
+  return type == "packet_send_fail" ||
+         type == "dxgi_error" ||
          type == "nvenc_error" ||
          type == "nvenc_probe_error" ||
          type == "network_error" ||
@@ -38,6 +42,7 @@ bool is_jsonl_rate_limited_type(std::string_view type) {
          type == "display_mode_changed" ||
          type == "capture_surface_recreate";
 }
+
 
 std::string iso8601(std::chrono::system_clock::time_point tp) {
   const auto tt = std::chrono::system_clock::to_time_t(tp);
@@ -264,6 +269,10 @@ std::string session_timeline_t::begin_session() {
   active_session_id_ = id;
   rings_[id] = {};
   last_category_[id] = failure_category::none;
+  first_frame_seen_[id] = false;
+  last_frame_number_[id] = 0;
+  video_format_[id] = -1;
+  last_frame_emitted_[id] = false;
 
   timeline_event_t ev {
     std::chrono::system_clock::now(),
@@ -281,7 +290,33 @@ void session_timeline_t::end_session(const std::string &session_id, std::string_
   if (session_id.empty()) {
     return;
   }
+  bool had_frame = false;
+  std::uint64_t last_fn = 0;
+  {
+    std::lock_guard lg(mutex_);
+    auto fit = first_frame_seen_.find(session_id);
+    had_frame = fit != first_frame_seen_.end() && fit->second;
+    auto lit = last_frame_number_.find(session_id);
+    if (lit != last_frame_number_.end()) {
+      last_fn = lit->second;
+    }
+  }
+  bool already_emitted = false;
+  {
+    std::lock_guard lg(mutex_);
+    auto eit = last_frame_emitted_.find(session_id);
+    already_emitted = eit != last_frame_emitted_.end() && eit->second;
+  }
+  if (had_frame && !already_emitted) {
+    emit(session_id, "last_frame", nlohmann::json {{"frame_number", last_fn}});
+    std::lock_guard lg(mutex_);
+    last_frame_emitted_[session_id] = true;
+  }
   nlohmann::json fields {{"reason", std::string(reason)}};
+  if (had_frame) {
+    fields["last_frame_number"] = last_fn;
+    fields["first_frame_seen"] = true;
+  }
   emit(session_id, "session_end", std::move(fields));
   std::lock_guard lg(mutex_);
   if (active_session_id_ == session_id) {
@@ -291,6 +326,10 @@ void session_timeline_t::end_session(const std::string &session_id, std::string_
   rings_.erase(session_id);
   last_category_.erase(session_id);
   last_jsonl_coalesce_.erase(session_id);
+  first_frame_seen_.erase(session_id);
+  last_frame_number_.erase(session_id);
+  video_format_.erase(session_id);
+  last_frame_emitted_.erase(session_id);
 }
 
 void session_timeline_t::set_active(const std::string &session_id) {
@@ -439,6 +478,44 @@ void session_timeline_t::emit_active(std::string_view type, nlohmann::json field
   emit(id, type, std::move(fields), persist);
 }
 
+void session_timeline_t::set_capture_meta(int video_format) {
+  std::lock_guard lg(mutex_);
+  if (active_session_id_.empty()) {
+    return;
+  }
+  video_format_[active_session_id_] = video_format;
+}
+
+void session_timeline_t::note_successful_frame(std::uint64_t frame_number) {
+  std::string id;
+  bool emit_first = false;
+  int vf = -1;
+  {
+    std::lock_guard lg(mutex_);
+    if (!enabled_ || active_session_id_.empty()) {
+      return;
+    }
+    id = active_session_id_;
+    last_frame_number_[id] = frame_number;
+    auto vit = video_format_.find(id);
+    if (vit != video_format_.end()) {
+      vf = vit->second;
+    }
+    auto &seen = first_frame_seen_[id];
+    if (!seen) {
+      seen = true;
+      emit_first = true;
+    }
+  }
+  if (emit_first) {
+    nlohmann::json fields {{"frame_number", frame_number}};
+    if (vf >= 0) {
+      fields["videoFormat"] = vf;
+    }
+    emit(id, "first_frame", std::move(fields));
+  }
+}
+
 void session_timeline_t::dump_ring_on_failure(const std::string &session_id, failure_category category) {
   if (session_id.empty()) {
     return;
@@ -454,6 +531,28 @@ void session_timeline_t::dump_ring_on_failure(const std::string &session_id, fai
   if (!out) {
     return;
   }
+  bool had_frame = false;
+  std::uint64_t last_fn = 0;
+  {
+    auto fit = first_frame_seen_.find(session_id);
+    had_frame = fit != first_frame_seen_.end() && fit->second;
+    auto lit = last_frame_number_.find(session_id);
+    if (lit != last_frame_number_.end()) {
+      last_fn = lit->second;
+    }
+  }
+  // Emit last_frame into ring/JSONL once on failure path (not per-frame spam).
+  if (had_frame && !last_frame_emitted_[session_id]) {
+    timeline_event_t last_ev {
+      std::chrono::system_clock::now(),
+      std::chrono::steady_clock::now(),
+      "last_frame",
+      nlohmann::json {{"frame_number", last_fn}},
+    };
+    append_jsonl_unlocked(session_id, last_ev);
+    rings_[session_id].push_back(last_ev);
+    last_frame_emitted_[session_id] = true;
+  }
   nlohmann::json header {
     {"type", "ring_dump"},
     {"session_id", session_id},
@@ -461,6 +560,10 @@ void session_timeline_t::dump_ring_on_failure(const std::string &session_id, fai
     {"window_ms", ring_window_.count()},
     {"ts", iso8601(std::chrono::system_clock::now())},
   };
+  if (had_frame) {
+    header["last_frame_number"] = last_fn;
+    header["first_frame_seen"] = true;
+  }
   out << header.dump() << '\n';
   auto it = rings_.find(session_id);
   if (it != rings_.end()) {
@@ -502,6 +605,12 @@ nlohmann::json session_timeline_t::health_snapshot() const {
     auto cat_it = last_category_.find(active_session_id_);
     if (cat_it != last_category_.end()) {
       j["last_category"] = category_name(cat_it->second);
+    }
+    auto ff = first_frame_seen_.find(active_session_id_);
+    j["first_frame_seen"] = ff != first_frame_seen_.end() && ff->second;
+    auto lf = last_frame_number_.find(active_session_id_);
+    if (lf != last_frame_number_.end()) {
+      j["last_frame_number"] = lf->second;
     }
     auto ring_it = rings_.find(active_session_id_);
     j["ring_event_count"] = ring_it == rings_.end() ? 0 : ring_it->second.size();

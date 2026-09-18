@@ -258,6 +258,14 @@ namespace platf::dxgi {
       // display or GPU changes. We should reinit to examine the updated state of
       // the display subsystem. It is recommended to call this once per frame.
       if (!factory->IsCurrent()) {
+        spotcobuild::track_display_change(
+          "hotplug",
+          config::video.output_name,
+          width,
+          height,
+          static_cast<double>(display_refresh_rate_rounded),
+          false
+        );
         return platf::capture_e::reinit;
       }
 
@@ -616,6 +624,26 @@ namespace platf::dxgi {
       << "Capture size       : "sv << width << 'x' << height << std::endl
       << "Offset             : "sv << offset_x << 'x' << offset_y << std::endl
       << "Virtual Desktop    : "sv << env_width << 'x' << env_height;
+
+    // Richer GPU/display context once DXGI adapter+output are known (session_alloc is too early).
+    {
+      const char *backend = "ddx";
+      if (config::video.capture == "wgc") {
+        backend = "wgc";
+      } else if (!config::video.capture.empty()) {
+        backend = config::video.capture.c_str();
+      }
+      spotcobuild::session_timeline_t::instance().emit_active("capture_context", nlohmann::json {
+        {"capture", backend},
+        {"display_name", display_name},
+        {"gpu_description", description},
+        {"vendor_id", adapter_desc.VendorId},
+        {"device_id", adapter_desc.DeviceId},
+        {"width", width},
+        {"height", height},
+        {"feature_level", feature_level},
+      });
+    }
 
     // Bump up thread priority
     {

@@ -51,6 +51,7 @@
 #include "src/platform/common.h"
 #include "src/utility.h"
 #include "utf_utils.h"
+#include "src/spotcobuild/network_timeline.h"
 
 // UDP_SEND_MSG_SIZE was added in the Windows 10 20H1 SDK
 #ifndef UDP_SEND_MSG_SIZE
@@ -1613,6 +1614,7 @@ namespace platf {
     if (WSASendMsg((SOCKET) send_info.native_socket, &msg, 0, &bytes_sent, nullptr, nullptr) == SOCKET_ERROR) {
       auto winerr = WSAGetLastError();
       BOOST_LOG(warning) << "WSASendMsg() failed: "sv << winerr;
+      spotcobuild::track_network_event("packet_send_fail", "udp", static_cast<std::int64_t>(winerr), "WSASendMsg");
       return false;
     }
 

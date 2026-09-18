@@ -131,6 +131,18 @@ you opt in. Timeline JSONL is on by default (logging only).
 - Append-only JSONL: `diagnostics/<uuid>.jsonl`
 - On failure: ring dump `diagnostics/<uuid>.ring.jsonl` (last 15–30s)
 
+Notable event types (additive; high-frequency types are ring-coalesced / rate-limited):
+
+| Event | When |
+|-------|------|
+| `session_alloc` / `session_start` / `session_end` | Session lifecycle (`session_end` includes `last_frame_number` when frames were encoded) |
+| `rtsp_first_message` | First RTSP method for the launch (emitted at `session_alloc`) |
+| `capture_start` / `capture_context` | Capture begin; Windows DXGI GPU/output context once adapter is known |
+| `first_frame` / `last_frame` | First successful encode once; last frame only on end/failure |
+| `control_ping_received` / `video_ping_received` / `audio_ping_received` | Ring-only coalesced pings (no JSONL spam) |
+| `packet_send_fail` / `udp_bind_fail` | Send / bind failures (coalesced / once) |
+| `display_change` / `capture_surface_recreate` / `dxgi_error` | Hotplug, mode change, desktop duplication loss |
+
 ### Recovery
 
 When `diag_recovery_enabled = true` and a recoverable category is hit
