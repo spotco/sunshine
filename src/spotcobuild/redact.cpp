@@ -45,10 +45,15 @@ bool looks_like_secret_key(std::string_view key) {
 std::string redact_text(std::string_view text) {
   std::string out(text);
   // PEM blocks
-  static const std::regex pem(R"(-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----)");
+  // ECMAScript std::regex: no (?i) or JS-only constructs — use icase flag.
+  static const std::regex pem(
+    R"(-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----)",
+    std::regex::ECMAScript);
   out = std::regex_replace(out, pem, std::string(kRedacted));
-  // password=... style
-  static const std::regex kv(R"((?i)(password|passwd|secret|token|pin|pkey|salt)\s*[:=]\s*\S+)");
+  // password=... style (case-insensitive via flag)
+  static const std::regex kv(
+    R"((password|passwd|secret|token|pin|pkey|salt)\s*[:=]\s*\S+)",
+    std::regex::ECMAScript | std::regex::icase);
   out = std::regex_replace(out, kv, std::string("$1=") + std::string(kRedacted));
   return out;
 }

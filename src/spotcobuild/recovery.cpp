@@ -70,7 +70,7 @@ nlohmann::json recovery_controller_t::health_snapshot() const {
   return j;
 }
 
-recovery_result_t recovery_controller_t::on_failure(const std::string &session_id, const classified_error_t &error, std::string_view current_codec) {
+recovery_result_t recovery_controller_t::on_failure(const std::string &session_id, const classified_error_t &classified, std::string_view current_codec) {
   recovery_result_t result;
   const auto switches = diag_switches_t::instance().get();
 
@@ -83,7 +83,7 @@ recovery_result_t recovery_controller_t::on_failure(const std::string &session_i
     return result;
   }
 
-  if (!is_recoverable(error.category) || error.startup_probe) {
+  if (!is_recoverable(classified.category) || classified.startup_probe) {
     result.action = recovery_action::give_up;
     result.detail = "failure not recoverable or startup_probe";
     std::lock_guard lg(mutex_);
@@ -96,7 +96,7 @@ recovery_result_t recovery_controller_t::on_failure(const std::string &session_i
 
   session_timeline_t::instance().emit(session_id, "recovery_attempt", nlohmann::json {
     {"attempt", attempt},
-    {"category", category_name(error.category)},
+    {"category", category_name(classified.category)},
     {"codec", std::string(current_codec)},
   });
 
@@ -166,8 +166,8 @@ recovery_result_t recovery_controller_t::on_failure(const std::string &session_i
   return result;
 }
 
-recovery_result_t handle_session_failure(const std::string &session_id, const classified_error_t &error, std::string_view current_codec) {
-  session_timeline_t::instance().dump_ring_on_failure(session_id, error.category);
+recovery_result_t handle_session_failure(const std::string &session_id, const classified_error_t &classified, std::string_view current_codec) {
+  session_timeline_t::instance().dump_ring_on_failure(session_id, classified.category);
 
   const auto switches = diag_switches_t::instance().get();
   if (switches.tdr_correlate_enabled) {
@@ -175,7 +175,7 @@ recovery_result_t handle_session_failure(const std::string &session_id, const cl
     correlate_tdr_wer(std::chrono::system_clock::now());
   }
 
-  return recovery_controller_t::instance().on_failure(session_id, error, current_codec);
+  return recovery_controller_t::instance().on_failure(session_id, classified, current_codec);
 }
 
 }  // namespace spotcobuild

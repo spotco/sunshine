@@ -50,7 +50,7 @@ public:
   static recovery_controller_t &instance();
 
   /** Decide and optionally arm recovery for a classified failure. Returns action for caller. */
-  recovery_result_t on_failure(const std::string &session_id, const classified_error_t &error, std::string_view current_codec);
+  recovery_result_t on_failure(const std::string &session_id, const classified_error_t &classified, std::string_view current_codec);
 
   /** Capture/encode loop should check this and treat as reinit request. */
   bool consume_recreate_request();
@@ -76,6 +76,6 @@ private:
 };
 
 /** Run TDR correlate + ring dump + recovery decision on session failure. */
-recovery_result_t handle_session_failure(const std::string &session_id, const classified_error_t &error, std::string_view current_codec);
+recovery_result_t handle_session_failure(const std::string &session_id, const classified_error_t &classified, std::string_view current_codec);
 
 }  // namespace spotcobuild
