@@ -59,3 +59,6 @@ node_modules/
 venv/
 # Local scratch (not committed)
 Temp/
+
+# Local stream diagnostics output (if ever written under repo)
+diagnostics/
