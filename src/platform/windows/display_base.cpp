@@ -42,6 +42,7 @@ typedef enum _D3DKMT_GPU_PREFERENCE_QUERY_STATE : DWORD {
 #include "src/config.h"
 #include "src/display_device.h"
 #include "src/logging.h"
+#include "src/spotcobuild/spotcobuild.h"
 #include "src/platform/common.h"
 #include "src/video.h"
 
@@ -166,6 +167,8 @@ namespace platf::dxgi {
       case WAIT_ABANDONED:
       case DXGI_ERROR_ACCESS_LOST:
       case DXGI_ERROR_ACCESS_DENIED:
+        spotcobuild::track_desktop_duplication_error(static_cast<std::int64_t>(static_cast<std::uint32_t>(status)), "AcquireNextFrame");
+        spotcobuild::track_capture_surface_recreate("ddx", "ACCESS_LOST_OR_DENIED");
         return capture_e::reinit;
       default:
         BOOST_LOG(error) << "Couldn't acquire next frame [0x"sv << util::hex(status).to_string_view();
@@ -197,6 +200,7 @@ namespace platf::dxgi {
         return capture_e::ok;
 
       case DXGI_ERROR_ACCESS_LOST:
+        spotcobuild::track_desktop_duplication_error(static_cast<std::int64_t>(static_cast<std::uint32_t>(status)), "ReleaseFrame");
         return capture_e::reinit;
 
       default:

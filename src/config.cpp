@@ -866,6 +866,27 @@ namespace config {
   /**
    * @brief Default top-level Sunshine configuration values used before file and CLI overrides.
    */
+
+  /**
+   * @brief Default spotcobuild diagnostics configuration (recovery off => legacy behavior).
+   */
+  diag_t diag {
+    true,  // timeline_enabled
+    false,  // recovery_enabled
+    false,  // recovery_allow_process_restart
+    false,  // recovery_allow_software_encode
+    500,  // recovery_backoff_ms
+    30,  // ring_seconds
+    true,  // tdr_correlate_enabled
+    {},  // force_codec
+    false,  // disable_hdr
+    {},  // force_display
+    {},  // force_capture
+    false,  // disable_nvenc_two_pass
+    false,  // disable_async_encoding
+    false,  // force_software_encode
+  };
+
   sunshine_t sunshine {
     "en",  // locale
     2,  // min_log_level
@@ -1707,6 +1728,44 @@ namespace config {
     bool_f(vars, "install_steam_audio_drivers", audio.install_steam_drivers);
 
     string_restricted_f(vars, "origin_web_ui_allowed", nvhttp.origin_web_ui_allowed, {"pc"sv, "lan"sv, "wan"sv});
+
+    // spotcobuild diagnostics / recovery (default-off recovery preserves legacy streaming behavior)
+    bool_f(vars, "diag_timeline_enabled", diag.timeline_enabled);
+    bool_f(vars, "diag_recovery_enabled", diag.recovery_enabled);
+    bool_f(vars, "diag_recovery_allow_process_restart", diag.recovery_allow_process_restart);
+    bool_f(vars, "diag_recovery_allow_software_encode", diag.recovery_allow_software_encode);
+    int_f(vars, "diag_recovery_backoff_ms", diag.recovery_backoff_ms);
+    int_f(vars, "diag_ring_seconds", diag.ring_seconds);
+    bool_f(vars, "diag_tdr_correlate_enabled", diag.tdr_correlate_enabled);
+    string_f(vars, "diag_force_codec", diag.force_codec);
+    bool_f(vars, "diag_disable_hdr", diag.disable_hdr);
+    string_f(vars, "diag_force_display", diag.force_display);
+    string_f(vars, "diag_force_capture", diag.force_capture);
+    bool_f(vars, "diag_disable_nvenc_two_pass", diag.disable_nvenc_two_pass);
+    bool_f(vars, "diag_disable_async_encoding", diag.disable_async_encoding);
+    bool_f(vars, "diag_force_software_encode", diag.force_software_encode);
+
+
+    if (!diag.force_capture.empty()) {
+      video.capture = diag.force_capture;
+    }
+    if (diag.force_codec == "h264") {
+      video.hevc_mode = 0;
+      video.av1_mode = 0;
+    }
+    else if (diag.force_codec == "hevc") {
+      video.hevc_mode = 3;
+    }
+    else if (diag.force_codec == "av1") {
+      video.av1_mode = 3;
+    }
+    if (diag.disable_nvenc_two_pass) {
+      video.nv.two_pass = nvenc::nvenc_two_pass::disabled;
+    }
+    if (diag.force_software_encode) {
+      // Prefer software by clearing hardware capture preference is host-specific; mark via capture empty leave.
+    }
+
 
     // Parse CSRF allowed origins - always include defaults, then append user-configured origins
     std::vector<std::string> user_csrf_origins;

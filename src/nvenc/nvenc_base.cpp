@@ -19,6 +19,7 @@
 #include "nvenc_utils.h"
 #include "src/config.h"
 #include "src/logging.h"
+#include "src/spotcobuild/error_classify.h"
 #include "src/utility.h"
 
 namespace {
@@ -489,6 +490,7 @@ namespace NVENC_NAMESPACE {
   bool nvenc_base::initialize_encoder_resources(NV_ENC_INITIALIZE_PARAMS &init_params) {
     if (nvenc_failed(nvenc->nvEncInitializeEncoder(encoder, &init_params))) {
       BOOST_LOG(error) << "NvEnc: NvEncInitializeEncoder() failed: " << last_nvenc_error_string;
+      spotcobuild::classify_nvenc_failure(last_nvenc_error_string, "NvEncInitializeEncoder", "init", true);
       return false;
     }
     if (async_event_handle) {
@@ -747,6 +749,7 @@ namespace NVENC_NAMESPACE {
 
     if (nvenc_failed(nvenc->nvEncEncodePicture(encoder, &pic_params))) {
       BOOST_LOG(error) << "NvEnc: NvEncEncodePicture() failed: " << last_nvenc_error_string;
+      spotcobuild::classify_nvenc_failure(last_nvenc_error_string, "NvEncEncodePicture", "active", false, frame_index);
       return {};
     }
 

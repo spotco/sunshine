@@ -339,6 +339,28 @@ namespace config {
     bool elevated;  ///< Whether the process should be launched elevated.
   };
 
+
+  /**
+   * @brief Spotcobuild stream diagnostics / recovery options (defaults preserve legacy behavior).
+   */
+  struct diag_t {
+    bool timeline_enabled = true;  ///< Write JSONL session timeline (additive logging).
+    bool recovery_enabled = false;  ///< In-process capture/encoder recovery (default off).
+    bool recovery_allow_process_restart = false;  ///< Allow platf::restart() as last resort.
+    bool recovery_allow_software_encode = false;  ///< Allow software encode fallback.
+    int recovery_backoff_ms = 500;  ///< Backoff before first recreate attempt.
+    int ring_seconds = 30;  ///< In-memory high-frequency event ring window.
+    bool tdr_correlate_enabled = true;  ///< Correlate Windows TDR/WER on failure.
+
+    std::string force_codec;  ///< Optional force codec: h264|hevc|av1 (empty = unset).
+    bool disable_hdr = false;  ///< Force disable HDR for diagnostics.
+    std::string force_display;  ///< physical|virtual (empty = unset).
+    std::string force_capture;  ///< Override capture backend name (empty = unset).
+    bool disable_nvenc_two_pass = false;
+    bool disable_async_encoding = false;
+    bool force_software_encode = false;
+  };
+
   /**
    * @brief Top-level Sunshine configuration and credential state.
    */
@@ -383,6 +405,7 @@ namespace config {
   extern nvhttp_t nvhttp;
   extern input_t input;
   extern sunshine_t sunshine;
+  extern diag_t diag;
 
 #ifdef SUNSHINE_TESTS
   /**

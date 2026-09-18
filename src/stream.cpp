@@ -28,6 +28,8 @@ extern "C" {
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
+#include "spotcobuild/spotcobuild.h"
+#include <nlohmann/json.hpp>
 #include "network.h"
 #include "platform/common.h"
 #include "process.h"
@@ -550,6 +552,7 @@ namespace stream {
       safe::mail_raw_t::event_t<video::hdr_info_t> hdr_queue;  ///< Queue of HDR metadata awaiting control-channel delivery.
     } control;  ///< Runtime state for the encrypted GameStream control channel.
 
+    std::string diag_session_id;  ///< Spotcobuild diagnostics UUID for this stream.
     std::uint32_t launch_session_id;  ///< RTSP launch-session ID associated with this stream.
     std::string client_cert;  ///< PEM certificate for the paired client owning the stream.
     std::string input_session_id;  ///< Stable client identity used to retain input devices across resume.
@@ -1164,6 +1167,9 @@ namespace stream {
   void controlBroadcastThread(control_server_t *server) {
     server->map(packetTypes[IDX_PERIODIC_PING], [](session_t *session, const std::string_view &payload) {
       BOOST_LOG(verbose) << "type [IDX_PERIODIC_PING]"sv;
+      spotcobuild::track_network_event("control_ping_received", "control");
+      (void) session;
+      (void) payload;
     });
 
     server->map(packetTypes[IDX_START_A], [&](session_t *session, const std::string_view &payload) {
@@ -1329,6 +1335,8 @@ namespace stream {
           if (now > session->pingTimeout) {
             auto address = session->control.peer ? platf::from_sockaddr((sockaddr *) &session->control.peer->address.address) : session->control.expected_peer_address;
             BOOST_LOG(info) << address << ": Ping Timeout"sv;
+            spotcobuild::track_network_event("network_timeout", "control", 0, "ping_timeout");
+            spotcobuild::session_timeline_t::instance().emit(session->diag_session_id, "control_ping_timeout", nlohmann::json {{"addr", address}});
             session::stop(*session);
           }
 
@@ -2206,6 +2214,7 @@ namespace stream {
       }
 
       session.shutdown_event->raise(true);
+      spotcobuild::session_timeline_t::instance().emit(session.diag_session_id, "session_stop", {});
     }
 
     /**
@@ -2257,6 +2266,7 @@ namespace stream {
       }
 
       BOOST_LOG(debug) << "Session ended"sv;
+      spotcobuild::session_timeline_t::instance().end_session(session.diag_session_id, "join");
     }
 
     /**
@@ -2293,6 +2303,12 @@ namespace stream {
 
       session.state.store(state_e::RUNNING, std::memory_order_relaxed);
 
+      spotcobuild::session_timeline_t::instance().set_active(session.diag_session_id);
+      spotcobuild::session_timeline_t::instance().emit(session.diag_session_id, "session_start", nlohmann::json {
+        {"addr", addr_string},
+      });
+      spotcobuild::track_network_event("session_start", "control");
+
       // If this is the first session, invoke the platform callbacks
       if (++running_sessions == 1) {
         platf::streaming_will_start();
@@ -2313,6 +2329,21 @@ namespace stream {
       auto mail = std::make_shared<safe::mail_raw_t>();
 
       session->shutdown_event = mail->event<bool>(mail::shutdown);
+
+      session->diag_session_id = spotcobuild::session_timeline_t::instance().begin_session();
+      {
+        nlohmann::json fields {
+          {"launch_session_id", launch_session.id},
+          {"videoFormat", config.monitor.videoFormat},
+          {"width", config.monitor.width},
+          {"height", config.monitor.height},
+          {"fps", config.monitor.framerate},
+          {"dynamicRange", config.monitor.dynamicRange},
+          {"client_name", launch_session.unique_id},
+        };
+        spotcobuild::session_timeline_t::instance().emit(session->diag_session_id, "session_alloc", std::move(fields));
+      }
+
       session->launch_session_id = launch_session.id;
       session->client_cert = launch_session.client_cert;
       session->input_session_id = launch_session.client_cert.empty() ? launch_session.unique_id : launch_session.client_cert;

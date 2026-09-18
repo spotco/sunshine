@@ -20,6 +20,7 @@
 #include "confighttp.h"
 #include "display_device.h"
 #include "entry_handler.h"
+#include "spotcobuild/spotcobuild.h"
 #include "globals.h"
 #include "httpcommon.h"
 #include "logging.h"
@@ -68,6 +69,13 @@ std::map<std::string_view, std::function<int(const char *name, int argc, char **
    }},
   {"version"sv, [](const char *name, int argc, char **argv) {
      return args::version();
+   }},
+  {"diagnostics"sv, [](const char *name, int argc, char **argv) {
+     (void) name;
+     (void) argc;
+     (void) argv;
+     spotcobuild::init_from_config();
+     return spotcobuild::run_diagnostics_cli();
    }},
 #ifdef _WIN32
   {"restore-nvprefs-undo"sv, [](const char *name, int argc, char **argv) {
@@ -216,6 +224,7 @@ int main(int argc, char *argv[]) {
   // if anything is logged prior to this point, it will appear in stdout, but not in the log viewer in the UI
   // the version should be printed to the log before anything else
   BOOST_LOG(info) << PROJECT_NAME << " version: " << PROJECT_VERSION << " commit: " << PROJECT_VERSION_COMMIT;
+  spotcobuild::init_from_config();
 
   // Log publisher metadata
   log_publisher_data();

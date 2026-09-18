@@ -24,6 +24,7 @@
 #include <boost/filesystem.hpp>
 #include <lizardbyte/common/env.h>
 #include <nlohmann/json.hpp>
+#include "spotcobuild/spotcobuild.h"
 #include <Simple-Web-Server/crypto.hpp>
 #include <Simple-Web-Server/server_https.hpp>
 
@@ -1863,6 +1864,44 @@ namespace confighttp {
    *
    * @api_examples{/api/restart| POST| null}
    */
+
+  void getDiagnosticsHealth(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    send_response(response, spotcobuild::health_snapshot());
+  }
+
+  void postDiagnosticsBundle(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    std::string client_id = get_client_id(request);
+    if (!validate_csrf_token(response, request, client_id)) {
+      return;
+    }
+    print_req(request);
+    auto bundle = spotcobuild::export_diagnostic_bundle();
+    nlohmann::json tree;
+    tree["status"] = bundle.ok;
+    tree["path"] = bundle.path.string();
+    tree["error"] = bundle.error;
+    send_response(response, tree);
+  }
+
+  void postDiagnosticsSelfTest(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    std::string client_id = get_client_id(request);
+    if (!validate_csrf_token(response, request, client_id)) {
+      return;
+    }
+    print_req(request);
+    send_response(response, spotcobuild::run_idle_self_test());
+  }
+
   void restart(const resp_https_t &response, const req_https_t &request) {
     if (!authenticate(response, request)) {
       return;
@@ -2300,6 +2339,9 @@ namespace confighttp {
     server.resource["^/api/logs$"]["GET"] = getLogs;
     server.resource["^/api/reset-display-device-persistence$"]["POST"] = resetDisplayDevicePersistence;
     server.resource["^/api/restart$"]["POST"] = restart;
+    server.resource["^/api/diagnostics/health$"]["GET"] = getDiagnosticsHealth;
+    server.resource["^/api/diagnostics/bundle$"]["POST"] = postDiagnosticsBundle;
+    server.resource["^/api/diagnostics/self-test$"]["POST"] = postDiagnosticsSelfTest;
     server.resource["^/api/virtual-input/license$"]["GET"] = getVirtualInputLicense;
     server.resource["^/api/virtual-input/license$"]["POST"] = updateVirtualInputLicense;
     server.resource["^/api/virtual-input/status$"]["GET"] = getVirtualInputStatus;

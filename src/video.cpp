@@ -31,6 +31,8 @@ extern "C" {
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
+#include "spotcobuild/spotcobuild.h"
+#include <nlohmann/json.hpp>
 #include "nvenc/nvenc_encoder.h"
 #include "platform/common.h"
 #include "sync.h"
@@ -1672,7 +1674,7 @@ namespace video {
     platf::adjust_thread_priority(platf::thread_priority_e::critical);
 
     while (capture_ctx_queue->running()) {
-      bool artificial_reinit = false;
+      bool artificial_reinit = spotcobuild::recovery_controller_t::instance().consume_recreate_request();
 
       auto push_captured_image_callback = [&](std::shared_ptr<platf::img_t> &&img, bool frame_captured) -> bool {
         KITTY_WHILE_LOOP(auto capture_ctx = std::begin(capture_ctxs), capture_ctx != std::end(capture_ctxs), {
@@ -2766,7 +2768,25 @@ namespace video {
 
           if (encode(ctx->frame_nr++, *pos->session, ctx->packets, ctx->channel_data, frame_timestamp)) {
             BOOST_LOG(error) << "Could not encode video packet"sv;
-            ctx->shutdown_event->raise(true);
+            {
+              const auto sid = spotcobuild::session_timeline_t::instance().active_session_id();
+              auto err = spotcobuild::classify_nvenc_failure("encode_failed", "encode", "active", false, ctx->frame_nr);
+              auto codec = "h264";
+              // Best-effort: prefer timeline codec hint from recovery override
+              const auto pref = spotcobuild::recovery_controller_t::instance().preferred_codec_override();
+              auto result = spotcobuild::handle_session_failure(sid, err, pref.empty() ? codec : pref);
+              if (result.action == spotcobuild::recovery_action::recreate_same_codec ||
+                  result.action == spotcobuild::recovery_action::fallback_h264 ||
+                  result.action == spotcobuild::recovery_action::fallback_software) {
+                // Force capture loop to take the existing reinit path (release/recreate display+encoder).
+                BOOST_LOG(warning) << "spotcobuild recovery armed; requesting capture/encoder recreate";
+                ec = platf::capture_e::reinit;
+                return false;
+              }
+              else {
+                ctx->shutdown_event->raise(true);
+              }
+            }
 
             continue;
           }
@@ -2877,7 +2897,7 @@ namespace video {
 
     while (!shutdown_event->peek() && images->running()) {
       // Wait for the main capture event when the display is being reinitialized
-      if (ref->reinit_event.peek()) {
+      if (ref->reinit_event.peek() || spotcobuild::recovery_controller_t::instance().consume_recreate_request()) {
         std::this_thread::sleep_for(20ms);
         continue;
       }
@@ -2940,6 +2960,36 @@ namespace video {
     void *channel_data
   ) {
     config = resolve_dynamic_range(*chosen_encoder, config);
+
+    // Apply spotcobuild diagnostic / recovery codec overrides (default unset => no change).
+    {
+      const auto pref = spotcobuild::recovery_controller_t::instance().preferred_codec_override();
+      const auto switches = spotcobuild::diag_switches_t::instance().get();
+      const auto codec = !pref.empty() ? pref : (switches.force_codec ? *switches.force_codec : std::string {});
+      if (codec == "h264") {
+        config.videoFormat = 0;
+      }
+      else if (codec == "hevc" || codec == "h265") {
+        config.videoFormat = 1;
+      }
+      else if (codec == "av1") {
+        config.videoFormat = 2;
+      }
+      if (switches.disable_hdr && *switches.disable_hdr) {
+        config.dynamicRange = 0;
+      }
+      if (spotcobuild::recovery_controller_t::instance().prefer_software_encode() ||
+          (switches.force_software_encode && *switches.force_software_encode)) {
+        spotcobuild::session_timeline_t::instance().emit_active("prefer_software_encode", {});
+      }
+      spotcobuild::session_timeline_t::instance().emit_active("capture_start", nlohmann::json {
+        {"videoFormat", config.videoFormat},
+        {"width", config.width},
+        {"height", config.height},
+        {"fps", config.framerate},
+        {"dynamicRange", config.dynamicRange},
+      });
+    }
 
     auto idr_events = mail->event<bool>(mail::idr);
 
