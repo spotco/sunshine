@@ -885,6 +885,9 @@ namespace config {
     false,  // disable_nvenc_two_pass
     false,  // disable_async_encoding
     false,  // force_software_encode
+    true,  // require_display_before_launch
+    30000,  // startup_display_wait_ms
+    15000,  // channel_raise_grace_ms (after control connected)
   };
 
   sunshine_t sunshine {
@@ -1744,6 +1747,9 @@ namespace config {
     bool_f(vars, "diag_disable_nvenc_two_pass", diag.disable_nvenc_two_pass);
     bool_f(vars, "diag_disable_async_encoding", diag.disable_async_encoding);
     bool_f(vars, "diag_force_software_encode", diag.force_software_encode);
+    bool_f(vars, "diag_require_display_before_launch", diag.require_display_before_launch);
+    int_f(vars, "diag_startup_display_wait_ms", diag.startup_display_wait_ms);
+    int_f(vars, "diag_channel_raise_grace_ms", diag.channel_raise_grace_ms);
 
 
     if (!diag.force_capture.empty()) {

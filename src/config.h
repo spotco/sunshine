@@ -359,6 +359,11 @@ namespace config {
     bool disable_nvenc_two_pass = false;
     bool disable_async_encoding = false;
     bool force_software_encode = false;
+
+    // Startup / handshake fail-safe (spotcobuild)
+    bool require_display_before_launch = true;  ///< Gate /launch until displays enumerate.
+    int startup_display_wait_ms = 30000;  ///< Max wait at process start for a display.
+    int channel_raise_grace_ms = 15000;  ///< Abort if audio raised but video not within this window.
   };
 
   /**

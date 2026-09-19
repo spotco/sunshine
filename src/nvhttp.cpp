@@ -30,6 +30,7 @@
 #include "httpcommon.h"
 #include "logging.h"
 #include "network.h"
+#include "spotcobuild/spotcobuild.h"
 #include "nvhttp.h"
 #include "platform/common.h"
 #include "process.h"
@@ -1321,6 +1322,14 @@ namespace nvhttp {
       tree.put("root.<xmlattr>.status_code", 400);
       tree.put("root.<xmlattr>.status_message", "An app is already running on this host");
 
+      return;
+    }
+
+    if (!spotcobuild::ensure_launch_ready(true)) {
+      tree.put("root.resume", 0);
+      tree.put("root.<xmlattr>.status_code", 503);
+      tree.put("root.<xmlattr>.status_message", "Host display not ready yet (spotcobuild startup gate). Retry shortly.");
+      tree.put("root.gamesession", 0);
       return;
     }
 

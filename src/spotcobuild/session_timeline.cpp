@@ -4,6 +4,7 @@
  */
 #include <cstdio>
 #include "session_timeline.h"
+#include "setup_failsafe.h"
 
 #include "src/logging.h"
 #include "src/platform/common.h"
@@ -459,11 +460,20 @@ void session_timeline_t::emit(const std::string &session_id, std::string_view ty
       ev.fields["count"] = 1;
     }
   }
-  if (persist) {
-    append_jsonl_unlocked(session_id, ev);
-    if (jsonl_rate_limit) {
-      last_jsonl_coalesce_[session_id][std::string(type)] = now_mono;
+  // Rate-limit JSONL by type even when events alternate (e.g. packet_send_fail <-> network_error).
+  bool write_jsonl = persist;
+  if (persist && jsonl_rate_limit) {
+    auto &last_map = last_jsonl_coalesce_[session_id];
+    auto lit = last_map.find(std::string(type));
+    const bool due = (lit == last_map.end()) ||
+      ((now_mono - lit->second) >= k_diag_jsonl_coalesce_interval);
+    write_jsonl = due;
+    if (due) {
+      last_map[std::string(type)] = now_mono;
     }
+  }
+  if (write_jsonl) {
+    append_jsonl_unlocked(session_id, ev);
   }
   ring.push_back(std::move(ev));
   prune_ring_unlocked(session_id, now_mono);
@@ -508,6 +518,7 @@ void session_timeline_t::note_successful_frame(std::uint64_t frame_number) {
     }
   }
   if (emit_first) {
+    note_setup_first_frame();
     nlohmann::json fields {{"frame_number", frame_number}};
     if (vf >= 0) {
       fields["videoFormat"] = vf;

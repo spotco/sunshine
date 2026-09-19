@@ -4,6 +4,7 @@
  */
 // standard includes
 #include <algorithm>
+#include <atomic>
 #include <sstream>
 
 // local includes
@@ -187,6 +188,35 @@ namespace net {
   /**
    * @brief Create an ENet host with the requested address family.
    */
+
+  // spotcobuild: dump first few ENet RX datagrams (CONNECT diagnose). Return 0 = continue normal handling.
+  static int spotcobuild_enet_rx_intercept(ENetHost *host, ENetEvent * /*event*/) {
+    static std::atomic<int> dumps {0};
+    const int n = dumps.fetch_add(1, std::memory_order_relaxed);
+    if (n >= 8) {
+      return 0;
+    }
+    if (!host || !host->receivedData || host->receivedDataLength <= 0) {
+      return 0;
+    }
+    const auto len = (size_t) host->receivedDataLength;
+    std::string hex;
+    hex.reserve(len * 2);
+    static const char *kHex = "0123456789ABCDEF";
+    for (size_t i = 0; i < len && i < 64; ++i) {
+      const auto b = (unsigned char) host->receivedData[i];
+      hex.push_back(kHex[b >> 4]);
+      hex.push_back(kHex[b & 0xF]);
+    }
+    const auto cmd = len > 4 ? (unsigned) (host->receivedData[4] & 0x0F) : 0u;
+    BOOST_LOG(info) << "spotcobuild: enet RX#"sv << n
+                    << " len="sv << len
+                    << " cmd_lo_nibble="sv << cmd
+                    << " (2=CONNECT) hex="sv << hex
+                    << (len > 64 ? "..." : "");
+    return 0;
+  }
+
   host_t host_create(af_e af, ENetAddress &addr, std::uint16_t port) {
     static std::once_flag enet_init_flag;
     std::call_once(enet_init_flag, []() {
@@ -200,8 +230,23 @@ namespace net {
     // Maximum of 128 clients, which should be enough for anyone
     auto host = host_t {enet_host_create(af == IPV4 ? AF_INET : AF_INET6, &addr, 128, 0, 0, 0)};
 
-    // Enable opportunistic QoS tagging (automatically disables if the network appears to drop tagged packets)
-    enet_socket_set_option(host->socket, ENET_SOCKOPT_QOS, 1);
+    if (!host) {
+      BOOST_LOG(error) << "spotcobuild: ENet host_create FAILED addr="sv << bind_addr << " port="sv << port;
+      return host;
+    }
+
+    // spotcobuild: disable QoS/ECN on Win10+ for LAN reliability (ECN-marked ENet can be dropped on path)
+    enet_socket_set_option(host->socket, ENET_SOCKOPT_QOS, 0);
+    // spotcobuild: wildcardBind makes VERIFY_CONNECT replies use WSASendMsg+IP_PKTINFO with the
+    // recv localAddress. When that is 0.0.0.0 / missing pktinfo, WSASendMsg fails (10022), the
+    // client never gets VERIFY, keeps retransmitting CONNECT (6x52B), and the host never reaches
+    // ENET_EVENT_TYPE_CONNECT. Force plain sendto like Moonlight's ENet host path.
+    host->wildcardBind = 0;
+    host->intercept = spotcobuild_enet_rx_intercept;
+    BOOST_LOG(info) << "spotcobuild: ENet host_create bind addr="sv << bind_addr
+                    << " port="sv << port
+                    << " socket_ok="sv << (host->socket != ENET_SOCKET_NULL)
+                    << " qos=0 wildcardBind=0 intercept=1"sv;
 
     return host;
   }
@@ -261,3 +306,4 @@ namespace net {
     return !instancename.empty() ? instancename : "Sunshine";
   }
 }  // namespace net
+
