@@ -9,8 +9,9 @@
 #include "diag_switches.h"
 #include "recovery.h"
 #include "session_timeline.h"
-#include "tdr_correlate.h"
+#include "setup_failsafe.h"
 #include "udp_probe.h"
+#include "tdr_correlate.h"
 
 #include "src/logging.h"
 #include "src/platform/common.h"
@@ -36,6 +37,7 @@ nlohmann::json health_snapshot() {
   j["recovery"] = recovery_controller_t::instance().health_snapshot();
   j["tdr"] = last_tdr_correlation().to_json();
   j["active_session_id"] = session_timeline_t::instance().active_session_id();
+  j["setup_failsafe"] = setup_failsafe_health_snapshot();
   j["udp_probe"] = udp_probe_health_snapshot();
   return j;
 }

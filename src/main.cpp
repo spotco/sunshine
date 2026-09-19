@@ -224,6 +224,9 @@ int main(int argc, char *argv[]) {
   // if anything is logged prior to this point, it will appear in stdout, but not in the log viewer in the UI
   // the version should be printed to the log before anything else
   BOOST_LOG(info) << PROJECT_NAME << " version: " << PROJECT_VERSION << " commit: " << PROJECT_VERSION_COMMIT;
+  // spotcobuild: make it obvious which drop-in is running (compile timestamp of this TU)
+  BOOST_LOG(info) << "spotcobuild: binary build time: " << __DATE__ << " " << __TIME__
+                  << " (main.cpp compile); exe mtime logged by drop-in notes separately";
   spotcobuild::init_from_config();
 
   // Log publisher metadata
@@ -346,6 +349,7 @@ int main(int argc, char *argv[]) {
 #endif
 
   task_pool.start(1);
+  spotcobuild::setup_failsafe_init();
 
   // Create signal handler after logging has been initialized
   auto shutdown_event = mail::man->event<bool>(mail::shutdown);
@@ -493,3 +497,4 @@ int main(int argc, char *argv[]) {
 
   return lifetime::desired_exit_code;
 }
+

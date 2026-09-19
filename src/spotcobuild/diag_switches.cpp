@@ -26,6 +26,9 @@ nlohmann::json diag_overrides_t::to_json() const {
   j["ring_seconds"] = ring_seconds;
   j["timeline_enabled"] = timeline_enabled;
   j["tdr_correlate_enabled"] = tdr_correlate_enabled;
+  j["require_display_before_launch"] = config::diag.require_display_before_launch;
+  j["startup_display_wait_ms"] = config::diag.startup_display_wait_ms;
+  j["channel_raise_grace_ms"] = config::diag.channel_raise_grace_ms;
   return j;
 }
 

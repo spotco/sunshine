@@ -204,8 +204,10 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/spotcobuild/display_track.h"
         "${CMAKE_SOURCE_DIR}/src/spotcobuild/network_timeline.cpp"
         "${CMAKE_SOURCE_DIR}/src/spotcobuild/network_timeline.h"
-        "${CMAKE_SOURCE_DIR}/src/spotcobuild/udp_probe.cpp"
+        "${CMAKE_SOURCE_DIR}/src/spotcobuild/setup_failsafe.cpp"
+        "${CMAKE_SOURCE_DIR}/src/spotcobuild/setup_failsafe.h"
         "${CMAKE_SOURCE_DIR}/src/spotcobuild/udp_probe.h"
+        "${CMAKE_SOURCE_DIR}/src/spotcobuild/udp_probe.cpp"
         "${CMAKE_SOURCE_DIR}/src/spotcobuild/categories.h"
         "${CMAKE_SOURCE_DIR}/src/spotcobuild/spotcobuild.h"
         ${PLATFORM_TARGET_FILES})

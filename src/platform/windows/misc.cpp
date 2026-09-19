@@ -9,6 +9,7 @@
 #include <iterator>
 #include <set>
 #include <sstream>
+#include <atomic>
 #include <vector>
 
 // lib includes
@@ -1437,6 +1438,20 @@ namespace platf {
 
   // Use UDP segmentation offload if it is supported by the OS. If the NIC is capable, this will use
   // hardware acceleration to reduce CPU usage. Support for USO was introduced in Windows 10 20H1.
+  // spotcobuild: On this host, WSASendMsg + IP_PKTINFO fails with WSAEINVAL (10022) not only for
+  // 0.0.0.0, but also when source is a real NIC address (e.g. 10.239.1.137) while the UDP socket
+  // is bound to 0.0.0.0. That drops all video/audio (client: no video traffic). Never attach
+  // PKTINFO on send; let the stack pick the outbound source. (Control ENet had the same class
+  // of bug via wildcardBind — fixed separately.)
+  static bool fill_pktinfo_cmsg(WSAMSG &msg, WSACMSGHDR *cm, ULONG &cmbuflen, const boost::asio::ip::address &source_address) {
+    // spotcobuild: never attach IP_PKTINFO on send — WSASendMsg returns WSAEINVAL (10022) on this
+    // host when the UDP socket is bound to 0.0.0.0, even with a real NIC source address.
+    (void) msg;
+    (void) cm;
+    (void) cmbuflen;
+    (void) source_address;
+    return false;
+  }
   bool send_batch(batched_send_info_t &send_info) {
     WSAMSG msg;
 
@@ -1495,42 +1510,21 @@ namespace platf {
     msg.Control.len = sizeof(cmbuf);
 
     auto cm = WSA_CMSG_FIRSTHDR(&msg);
-    if (send_info.source_address.is_v6()) {
-      IN6_PKTINFO pktInfo;
-
-      SOCKADDR_IN6 saddr_v6 = to_sockaddr(send_info.source_address.to_v6(), 0);
-      pktInfo.ipi6_addr = saddr_v6.sin6_addr;
-      pktInfo.ipi6_ifindex = 0;
-
-      cmbuflen += WSA_CMSG_SPACE(sizeof(pktInfo));
-
-      cm->cmsg_level = IPPROTO_IPV6;
-      cm->cmsg_type = IPV6_PKTINFO;
-      cm->cmsg_len = WSA_CMSG_LEN(sizeof(pktInfo));
-      memcpy(WSA_CMSG_DATA(cm), &pktInfo, sizeof(pktInfo));
-    } else {
-      IN_PKTINFO pktInfo;
-
-      SOCKADDR_IN saddr_v4 = to_sockaddr(send_info.source_address.to_v4(), 0);
-      pktInfo.ipi_addr = saddr_v4.sin_addr;
-      pktInfo.ipi_ifindex = 0;
-
-      cmbuflen += WSA_CMSG_SPACE(sizeof(pktInfo));
-
-      cm->cmsg_level = IPPROTO_IP;
-      cm->cmsg_type = IP_PKTINFO;
-      cm->cmsg_len = WSA_CMSG_LEN(sizeof(pktInfo));
-      memcpy(WSA_CMSG_DATA(cm), &pktInfo, sizeof(pktInfo));
-    }
+    const bool have_pktinfo = fill_pktinfo_cmsg(msg, cm, cmbuflen, send_info.source_address);
 
     if (send_info.block_count > 1) {
       cmbuflen += WSA_CMSG_SPACE(sizeof(DWORD));
-
-      cm = WSA_CMSG_NXTHDR(&msg, cm);
+      if (have_pktinfo) {
+        cm = WSA_CMSG_NXTHDR(&msg, cm);
+      }
       cm->cmsg_level = IPPROTO_UDP;
       cm->cmsg_type = UDP_SEND_MSG_SIZE;
       cm->cmsg_len = WSA_CMSG_LEN(sizeof(DWORD));
       *((DWORD *) WSA_CMSG_DATA(cm)) = send_info.header_size + send_info.payload_size;
+    }
+    else if (!have_pktinfo) {
+      msg.Control.buf = nullptr;
+      cmbuflen = 0;
     }
 
     msg.Control.len = cmbuflen;
@@ -1580,32 +1574,11 @@ namespace platf {
     msg.Control.len = sizeof(cmbuf);
 
     auto cm = WSA_CMSG_FIRSTHDR(&msg);
-    if (send_info.source_address.is_v6()) {
-      IN6_PKTINFO pktInfo;
-
-      SOCKADDR_IN6 saddr_v6 = to_sockaddr(send_info.source_address.to_v6(), 0);
-      pktInfo.ipi6_addr = saddr_v6.sin6_addr;
-      pktInfo.ipi6_ifindex = 0;
-
-      cmbuflen += WSA_CMSG_SPACE(sizeof(pktInfo));
-
-      cm->cmsg_level = IPPROTO_IPV6;
-      cm->cmsg_type = IPV6_PKTINFO;
-      cm->cmsg_len = WSA_CMSG_LEN(sizeof(pktInfo));
-      memcpy(WSA_CMSG_DATA(cm), &pktInfo, sizeof(pktInfo));
-    } else {
-      IN_PKTINFO pktInfo;
-
-      SOCKADDR_IN saddr_v4 = to_sockaddr(send_info.source_address.to_v4(), 0);
-      pktInfo.ipi_addr = saddr_v4.sin_addr;
-      pktInfo.ipi_ifindex = 0;
-
-      cmbuflen += WSA_CMSG_SPACE(sizeof(pktInfo));
-
-      cm->cmsg_level = IPPROTO_IP;
-      cm->cmsg_type = IP_PKTINFO;
-      cm->cmsg_len = WSA_CMSG_LEN(sizeof(pktInfo));
-      memcpy(WSA_CMSG_DATA(cm), &pktInfo, sizeof(pktInfo));
+    if (!fill_pktinfo_cmsg(msg, cm, cmbuflen, send_info.source_address)) {
+      // No PKTINFO — clear control buffer so WSASendMsg does not see an empty/partial cmsg.
+      msg.Control.buf = nullptr;
+      msg.Control.len = 0;
+      cmbuflen = 0;
     }
 
     msg.Control.len = cmbuflen;
@@ -1613,7 +1586,15 @@ namespace platf {
     DWORD bytes_sent;
     if (WSASendMsg((SOCKET) send_info.native_socket, &msg, 0, &bytes_sent, nullptr, nullptr) == SOCKET_ERROR) {
       auto winerr = WSAGetLastError();
-      BOOST_LOG(warning) << "WSASendMsg() failed: "sv << winerr;
+      static std::atomic<bool> logged_einval {false};
+      if (winerr == WSAEINVAL && !logged_einval.exchange(true)) {
+        BOOST_LOG(error) << "spotcobuild: WSASendMsg 10022 detail source="sv << send_info.source_address.to_string()
+                         << " dest="sv << send_info.target_address.to_string() << ':' << send_info.target_port
+                         << " payload="sv << send_info.payload_size;
+      }
+      else {
+        BOOST_LOG(warning) << "WSASendMsg() failed: "sv << winerr;
+      }
       spotcobuild::track_network_event("packet_send_fail", "udp", static_cast<std::int64_t>(winerr), "WSASendMsg");
       return false;
     }
@@ -1880,3 +1861,4 @@ namespace platf {
     return {};
   }
 }  // namespace platf
+
