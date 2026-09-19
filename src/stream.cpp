@@ -1492,6 +1492,14 @@ namespace stream {
           return;
         }
 
+        // Spotco UDP probe: echo and do not RAISE as stream ping.
+        {
+          const auto channel = buf_elem ? spotcobuild::udp_probe_channel_e::audio : spotcobuild::udp_probe_channel_e::video;
+          if (spotcobuild::handle_udp_probe_datagram(channel, sock, peer, buf[buf_elem].data(), bytes)) {
+            return;
+          }
+        }
+
         if (bytes == 4) {
           // For legacy PING packets, find the matching session by address.
           auto it = peer_to_session.find(peer.address());
@@ -1974,9 +1982,13 @@ namespace stream {
     auto video_port = net::map_port(VIDEO_STREAM_PORT);
     auto audio_port = net::map_port(AUDIO_STREAM_PORT);
 
+    // Release idle probe sockets so broadcast can bind the GameStream UDP ports.
+    spotcobuild::stop_udp_probe_idle_listeners();
+
     if (ctx.control_server.bind(address_family, control_port)) {
       BOOST_LOG(error) << "Couldn't bind Control server to port ["sv << control_port << "], likely another process already bound to the port"sv;
       spotcobuild::track_network_event("udp_bind_fail", "control", control_port, "control_bind");
+      spotcobuild::start_udp_probe_idle_listeners();
       return -1;
     }
 
@@ -1984,7 +1996,7 @@ namespace stream {
     ctx.video_sock.open(protocol, ec);
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't open socket for Video server: "sv << ec.message();
-
+      spotcobuild::start_udp_probe_idle_listeners();
       return -1;
     }
 
@@ -1999,6 +2011,7 @@ namespace stream {
     const auto bind_addr = boost::asio::ip::make_address(bind_addr_str, ec);
     if (ec) {
       BOOST_LOG(fatal) << "Invalid bind address: "sv << bind_addr_str << " - " << ec.message();
+      spotcobuild::start_udp_probe_idle_listeners();
       return -1;
     }
 
@@ -2006,13 +2019,14 @@ namespace stream {
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Video server to port ["sv << video_port << "]: "sv << ec.message();
       spotcobuild::track_network_event("udp_bind_fail", "video", ec.value(), ec.message());
+      spotcobuild::start_udp_probe_idle_listeners();
       return -1;
     }
 
     ctx.audio_sock.open(protocol, ec);
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't open socket for Audio server: "sv << ec.message();
-
+      spotcobuild::start_udp_probe_idle_listeners();
       return -1;
     }
 
@@ -2020,6 +2034,7 @@ namespace stream {
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Audio server to port ["sv << audio_port << "]: "sv << ec.message();
       spotcobuild::track_network_event("udp_bind_fail", "audio", ec.value(), ec.message());
+      spotcobuild::start_udp_probe_idle_listeners();
       return -1;
     }
 
@@ -2069,6 +2084,9 @@ namespace stream {
     BOOST_LOG(debug) << "All broadcasting threads ended"sv;
 
     broadcast_shutdown_event->reset();
+
+    // Re-bind idle probe listeners so Test Host UDP works while SERVER_FREE.
+    spotcobuild::start_udp_probe_idle_listeners();
   }
 
   /**

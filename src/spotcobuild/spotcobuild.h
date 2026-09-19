@@ -15,12 +15,14 @@
 #include "redact.h"
 #include "session_timeline.h"
 #include "tdr_correlate.h"
+#include "udp_probe.h"
 
 namespace spotcobuild {
 
 /** Apply config-backed switches and prepare diagnostics directory. */
 inline void init_from_config() {
   diag_switches_t::instance().apply_from_config();
+  start_udp_probe_idle_listeners();
 }
 
 }  // namespace spotcobuild
