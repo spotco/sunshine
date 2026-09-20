@@ -279,19 +279,7 @@ namespace system_tray {
         // Tray menu labels currently use the project's English source strings.
         {.text = "Open Sunshine", .cb = tray_open_ui_cb},
         {.text = "-"},
-  #ifdef _WIN32
-        {.text = "Virtual HID Driver", .submenu = virtualhid_license_menu.data()},
-        {.text = "-"},
-  #endif
-        {.text = "Donate",
-         .submenu =
-           (struct tray_menu[]) {
-             {.text = "GitHub Sponsors", .cb = tray_donate_github_cb},
-             {.text = "Patreon", .cb = tray_donate_patreon_cb},
-             {.text = "PayPal", .cb = tray_donate_paypal_cb},
-             {.text = nullptr}
-           }},
-        {.text = "-"},
+  // spotcobuild: removed Virtual HID Driver + Donate tray upsells
   // Currently display device settings are only supported on Windows
   #ifdef _WIN32
         {.text = "Reset Display Device Config", .cb = tray_reset_display_device_config_cb},
@@ -478,15 +466,8 @@ namespace system_tray {
     clear_tray_notification();
     rebuild_virtualhid_license_menu(license);
 
-    if (notify_if_unlicensed && !license.licensed()) {
-      tray.notification_title = "Activate Virtual HID Driver";
-      tray.notification_text =
-        "Adds a Raw Input keyboard and mouse plus Xbox One/Series, DualSense (DS5), Switch Pro, and Generic gamepads. Actively maintained by LizardByte. Click to activate or buy a license; details remain in the tray menu.";
-      tray.notification_icon = tray.allIconPaths[4];
-      tray.notification_cb = []() {
-        launch_ui("/troubleshooting#virtualhid-license");
-      };
-    }
+    // spotcobuild: never toast Virtual HID license upsells
+    (void)notify_if_unlicensed;
 
     if (tray_initialized_state().load()) {
       tray_update(&tray);
@@ -494,8 +475,7 @@ namespace system_tray {
   }
 
   void prepare_tray_virtualhid_license() {
-    const auto result = lvh::get_license_status();
-    update_tray_virtualhid_license(result.license, !result.license.licensed());
+    // spotcobuild: skip Virtual HID license tray prep / notify
   }
 
   void update_tray_virtualhid_driver(
@@ -504,6 +484,12 @@ namespace system_tray {
     const bool version_compatible,
     const std::string_view supported_versions
   ) {
+    // spotcobuild: never toast Virtual HID driver upsells
+    (void)installed;
+    (void)version;
+    (void)version_compatible;
+    (void)supported_versions;
+    return;
     if (!installed || version_compatible) {
       return;
     }

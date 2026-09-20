@@ -29,7 +29,7 @@
     </div>
 
     <!-- libvirtualhid Warning -->
-    <div class="alert alert-warning my-4" v-if="platform === 'windows' && virtualhid && (!virtualhid.installed || (!virtualhid.version_compatible && !virtualhid.development_version))">
+    <div class="alert alert-warning my-4" v-if="false /* spotcobuild: hide libvirtualhid not-installed/outdated banner */">
       <div>
         <div class="d-flex align-items-center mb-3">
           <alert-triangle :size="32" class="icon-lg me-3"></alert-triangle>
@@ -52,7 +52,7 @@
     </div>
 
     <!-- libvirtualhid Development Build Notice -->
-    <div class="alert alert-info my-4" v-if="platform === 'windows' && virtualhid && virtualhid.development_version">
+    <div class="alert alert-info my-4" v-if="false /* spotcobuild: hide libvirtualhid development banner */">
       <div class="d-flex align-items-center">
         <info :size="32" class="icon-lg me-3"></info>
         <div>
@@ -62,7 +62,7 @@
       </div>
     </div>
 
-    <div class="alert alert-warning my-4" v-if="platform === 'windows' && controllerEnabled && virtualhid && vigembus && !virtualhid.installed && vigembus.installed">
+    <div class="alert alert-warning my-4" v-if="false /* spotcobuild: hide Gamepad Support Is Limited banner */">
       <div class="d-flex align-items-center">
         <alert-triangle :size="32" class="icon-lg me-3"></alert-triangle>
         <div>
@@ -73,7 +73,7 @@
     </div>
 
     <!-- Virtual HID Driver license warning -->
-    <div class="alert alert-warning my-4" v-if="platform === 'windows' && virtualhidLicense && !virtualhidLicense.licensed">
+    <div class="alert alert-warning my-4" v-if="false /* spotcobuild: hide Virtual HID license missing banner */">
       <div>
         <div class="d-flex align-items-center mb-3">
           <alert-triangle :size="32" class="icon-lg me-3"></alert-triangle>

@@ -68,7 +68,7 @@ if (-not (Test-IsAdmin)) {
         Write-Host "WhatIf: BuildDir=$BuildDir InstallDir=$InstallDir SkipAssets=$SkipAssets"
         return
     }
-    Write-Host "Not elevated — requesting UAC for service stop / Program Files write..."
+    Write-Host "Not elevated - requesting UAC for service stop / Program Files write..."
     $argList = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
         '-File', $MyInvocation.MyCommand.Path,

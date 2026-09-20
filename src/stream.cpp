@@ -2057,6 +2057,9 @@ namespace stream {
    * @brief Bind the GameStream UDP and control sockets used for a streaming session.
    */
   int start_broadcast(broadcast_ctx_t &ctx) {
+    // spotcobuild: idle UDP probe holds video/audio ports — release before stream bind
+    spotcobuild::stop_udp_probe_idle_listeners();
+
     auto address_family = net::af_from_enum_string(config::sunshine.address_family);
     auto protocol = address_family == net::IPV4 ? udp::v4() : udp::v6();
     auto control_port = net::map_port(CONTROL_PORT);
@@ -2158,6 +2161,9 @@ namespace stream {
     BOOST_LOG(debug) << "All broadcasting threads ended"sv;
 
     broadcast_shutdown_event->reset();
+
+    // spotcobuild: restore idle UDP probe listeners after stream ports are free
+    spotcobuild::start_udp_probe_idle_listeners();
   }
 
   /**

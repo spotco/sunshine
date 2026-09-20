@@ -575,6 +575,13 @@ namespace confighttp {
       return false;
     }
 
+    // spotcobuild: loopback Web UI (localhost / 127.0.0.1 / ::1) skips Basic auth.
+    // Non-loopback peers still require username/password. First-run welcome redirect above still applies.
+    if (net::normalize_address(request->remote_endpoint().address()).is_loopback()) {
+      BOOST_LOG(debug) << "Web UI: ["sv << address << "] -- loopback auth bypass"sv;
+      return true;
+    }
+
     auto fg = util::fail_guard([&]() {
       send_unauthorized(response, request);
     });
